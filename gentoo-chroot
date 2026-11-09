@@ -14,7 +14,7 @@ CHROOT_DIR=$1
 CHROOT_USER=$2
 ENV_WHITELIST=$3
 
-OVERLAYS='bin etc home lib lib64 opt root sbin usr var tmp'
+OVERLAYS='bin etc home media lib lib64 mnt opt root sbin usr var tmp'
 
 WHOAMI=$( basename "$0" )
 OVERLAY_DIR=$( mktemp -d "/tmp/${WHOAMI}.XXXXXXXXXX")
@@ -26,9 +26,9 @@ fail() {
 
 make_overlays() {
     for DIR in $OVERLAYS ; do
-        mkdir -p $CHROOT_DIR/$DIR
-        mkdir -p $OVERLAY_DIR/upper/$DIR
-        mkdir -p $OVERLAY_DIR/work/$DIR
+        mkdir -p $CHROOT_DIR/$DIR $OVERLAY_DIR/upper/$DIR $OVERLAY_DIR/work/$DIR
+        chmod $(stat -c '%a' /$DIR) $OVERLAY_DIR/upper/$DIR
+        chown $(stat -c '%u:%g' /$DIR) $OVERLAY_DIR/upper/$DIR
     done
 }
 
@@ -62,11 +62,12 @@ umount_pseudo() {
 test -e "$CHROOT_DIR" && {
     rmdir "$CHROOT_DIR"
 }
-mkdir "$CHROOT_DIR"
+mkdir -p "$CHROOT_DIR"
 
 mount_pseudo
 make_overlays
 touch $OVERLAY_DIR/upper$OVERLAY_DIR
+touch $OVERLAY_DIR/upper$CHROOT_DIR
 mount_overlays
 
 cat >>$CHROOT_DIR/root/.bashrc <<__eod__
@@ -79,7 +80,7 @@ export PS1="($(basename $CHROOT_DIR)) \$PS1"
 export XAUTHORITY=~/.Xauthority
 __eod__
 
-chroot /mnt/chroot /bin/su -l -w "$ENV_WHITELIST" $CHROOT_USER || :
+chroot $CHROOT_DIR /bin/su -l -w "$ENV_WHITELIST" $CHROOT_USER || :
 
 umount_overlays
 umount_pseudo
