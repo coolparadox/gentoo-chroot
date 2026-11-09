@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+#
+# Prompt into a chroot jail that mimics the host Gentoo Linux system.
+#
+# usage: gentoo-chroot <chroot directory> <user> <whitelisted environment variables>
+# sample: gentoo-chroot /mnt/chroot lorandi "DISPLAY"
+#
+# The chroot jail is released on exit.
+#
+
+set -euo pipefail
+
+CHROOT_DIR=$1
+CHROOT_USER=$2
+ENV_WHITELIST=$3
+
+OVERLAYS='bin etc home lib lib64 opt root sbin usr var tmp'
+
+WHOAMI=$( basename "$0" )
+OVERLAY_DIR=$( mktemp -d "/tmp/${WHOAMI}.XXXXXXXXXX")
+
+fail() {
+    echo "${WHOAMI}: error: $*" >&2
+    exit 1
+}
+
+make_overlays() {
+    for DIR in $OVERLAYS ; do
+        mkdir -p $CHROOT_DIR/$DIR
+        mkdir -p $OVERLAY_DIR/upper/$DIR
+        mkdir -p $OVERLAY_DIR/work/$DIR
+    done
+}
+
+mount_overlays() {
+    for DIR in $OVERLAYS ; do
+        mount -t overlay overlay -o volatile,lowerdir=/$DIR,upperdir=$OVERLAY_DIR/upper/$DIR,workdir=$OVERLAY_DIR/work/$DIR $CHROOT_DIR/$DIR
+    done
+}
+
+umount_overlays() {
+    for DIR in $OVERLAYS ; do
+        umount --lazy $CHROOT_DIR/$DIR
+        rmdir $CHROOT_DIR/$DIR
+    done
+}
+
+mount_pseudo() {
+    mkdir $CHROOT_DIR/proc && mount --types proc /proc $CHROOT_DIR/proc
+    mkdir $CHROOT_DIR/sys && mount --rbind /sys $CHROOT_DIR/sys && mount --make-rslave $CHROOT_DIR/sys
+    mkdir $CHROOT_DIR/dev && mount --rbind /dev $CHROOT_DIR/dev && mount --make-rslave $CHROOT_DIR/dev
+    mkdir $CHROOT_DIR/run && mount --bind /run $CHROOT_DIR/run && mount --make-slave $CHROOT_DIR/run
+}
+
+umount_pseudo() {
+    umount --lazy $CHROOT_DIR/run && rmdir $CHROOT_DIR/run
+    umount --lazy $CHROOT_DIR/dev && rmdir $CHROOT_DIR/dev
+    umount --lazy $CHROOT_DIR/sys && rmdir $CHROOT_DIR/sys
+    umount --lazy $CHROOT_DIR/proc && rmdir $CHROOT_DIR/proc
+}
+
+test -e "$CHROOT_DIR" && {
+    rmdir "$CHROOT_DIR"
+}
+mkdir "$CHROOT_DIR"
+
+mount_pseudo
+make_overlays
+touch $OVERLAY_DIR/upper$OVERLAY_DIR
+mount_overlays
+
+cat >>$CHROOT_DIR/root/.bashrc <<__eod__
+export PS1="($(basename $CHROOT_DIR)) \$PS1"
+__eod__
+
+eval USER_DIR=~$CHROOT_USER
+cat >>$CHROOT_DIR/$USER_DIR/.bashrc <<__eod__
+export PS1="($(basename $CHROOT_DIR)) \$PS1"
+export XAUTHORITY=~/.Xauthority
+__eod__
+
+chroot /mnt/chroot /bin/su -l -w "$ENV_WHITELIST" $CHROOT_USER || :
+
+umount_overlays
+umount_pseudo
+rm -r "$OVERLAY_DIR"
+
+
