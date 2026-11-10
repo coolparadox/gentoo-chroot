@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+#
+# Prompt into an user-mode Linux instance that mimics the host Gentoo Linux system.
+#
+# usage: ?
+#
+
+set -x
+set -euo pipefail
+
+CHROOT_DIR=$1
+CHROOT_USER=$2
+
+WHOAMI=$( basename "$0" )
+OVERLAY_DIR=$( mktemp -d "/tmp/${WHOAMI}.XXXXXXXXXX")
+
+fail() {
+    echo "${WHOAMI}: error: $*" >&2
+    exit 1
+}
+
+# FIXME: implement me
+fail "not implemented"
+
+make_overlay() {
+    local DIR=$1
+    mkdir -p $CHROOT_DIR/$DIR $OVERLAY_DIR/upper/$DIR $OVERLAY_DIR/work/$DIR
+    chmod $(stat -c '%a' /$DIR) $OVERLAY_DIR/upper/$DIR
+    chown $(stat -c '%u:%g' /$DIR) $OVERLAY_DIR/upper/$DIR
+}
+
+mount_overlay() {
+    local DIR=$1
+    mount \
+        -t overlay overlay \
+        -o volatile,lowerdir=/$DIR,upperdir=$OVERLAY_DIR/upper/$DIR,workdir=$OVERLAY_DIR/work/$DIR \
+        $CHROOT_DIR/$DIR
+}
+
+umount_overlay() {
+    umount --lazy $CHROOT_DIR/$DIR
+    rmdir $CHROOT_DIR/$DIR
+}
+
+mkdir -p $CHROOT_DIR
+TOP_DIRS='bin etc home media mnt lib lib64 opt root sbin usr tmp var'
+
+for DIR in $TOP_DIRS ; do make_overlay $DIR ; done
+touch $OVERLAY_DIR/upper$OVERLAY_DIR
+touch $OVERLAY_DIR/upper$CHROOT_DIR
+for DIR in $TOP_DIRS ; do mount_overlay $DIR ; done
+find $CHROOT_DIR/tmp -mindepth 1 -delete
+
+for DIR in 'dev run run/lock proc sys' ; do mkdir -p $CHROOT_DIR/$DIR ; done
+
+cat >>$CHROOT_DIR/root/.bashrc <<__eod__
+export PS1="($(basename $CHROOT_DIR)) \$PS1"
+__eod__
+
+
+exit 0
+
+
+
+
+chroot $CHROOT_DIR /bin/bash -l
+
+for DIR in $TOP_DIRS ; do umount_overlay $DIR ; done
+rm -r "$OVERLAY_DIR"
+
+
