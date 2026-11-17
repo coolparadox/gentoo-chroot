@@ -12,7 +12,7 @@ set -euo pipefail
 
 CHROOT_DIR=$1
 CHROOT_USER=$2
-ENV_WHITELIST=$3
+CHROOT_ENV_WHITELIST=$3
 
 OVERLAYS='bin etc home media lib lib64 mnt opt root sbin usr var tmp'
 
@@ -22,6 +22,10 @@ OVERLAY_DIR=$( mktemp -d "/tmp/${WHOAMI}.XXXXXXXXXX")
 fail() {
     echo "${WHOAMI}: error: $*" >&2
     exit 1
+}
+
+warn() {
+    echo "${WHOAMI}: warning: $*" >&2
 }
 
 make_overlays() {
@@ -70,20 +74,31 @@ touch $OVERLAY_DIR/upper$OVERLAY_DIR
 touch $OVERLAY_DIR/upper$CHROOT_DIR
 mount_overlays
 
-cat >>$CHROOT_DIR/root/.bashrc <<__eod__
-export PS1="($(basename $CHROOT_DIR)) \$PS1"
-__eod__
-
 eval USER_DIR=~$CHROOT_USER
 cat >>$CHROOT_DIR/$USER_DIR/.bashrc <<__eod__
 export PS1="($(basename $CHROOT_DIR)) \$PS1"
 export XAUTHORITY=~/.Xauthority
 __eod__
 
-chroot $CHROOT_DIR /bin/su -l -w "$ENV_WHITELIST" $CHROOT_USER || :
+test "$CHROOT_USER" = 'root' || {
+    cat >>$CHROOT_DIR/root/.bashrc <<__eod__
+export PS1="($(basename $CHROOT_DIR)) \$PS1"
+__eod__
+}
+
+set +e
+chroot $CHROOT_DIR /bin/su -l -w "$CHROOT_ENV_WHITELIST" $CHROOT_USER
+CHROOT_STATUS=$?
+set -e
 
 umount_overlays
 umount_pseudo
 rm -r "$OVERLAY_DIR"
 
+find "$CHROOT_DIR" -mindepth 1 -maxdepth 1 | while read F ; do
+    warn "leftovers under $CHROOT_DIR"
+    break
+done
+
+exit $CHROOT_STATUS
 
